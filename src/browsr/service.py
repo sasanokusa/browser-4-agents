@@ -108,13 +108,22 @@ class Browsr:
         for sid in self.sessions.sweep():
             self._session_locks.pop(sid, None)
             await self.pool.drop_context(sid)
+            if self.pages is not None:
+                await self.pages.drop_context(sid)
 
     async def call(self, sid: str, tool: str, raw_args: Any) -> dict:
         started = time.monotonic()
         call = None
         session = None
         cancelled = None
-        metrics = {"backend": None, "cache": False, "part": None, "failed_url": None}
+        detail = ""
+        metrics = {
+            "backend": None,
+            "cache": False,
+            "part": None,
+            "via": None,
+            "failed_url": None,
+        }
         token = self._metrics.set(metrics)
         try:
             call = normalize(tool, raw_args)
@@ -128,16 +137,19 @@ class Browsr:
             outcome = "ok"
         except BrowsrError as exc:
             outcome = exc.code
+            detail = exc.detail
             alternative = self._alt(session, exc, metrics["failed_url"])
             out = render.error(exc.code, hint(exc.code, exc.status, alternative))
         except asyncio.CancelledError as exc:
             # A disconnected caller is still a call for evaluation/logging.
             cancelled = exc
+            detail = "CancelledError: caller cancelled"
             outcome = "timeout"
             out = render.error(outcome, hint(outcome))
         except Exception as exc:
             logger.exception("Call failed")
-            outcome = "timeout" if isinstance(exc, TimeoutError) else "blocked"
+            detail = f"{type(exc).__name__}: {exc}"
+            outcome = "timeout" if isinstance(exc, TimeoutError) else "fetch_failed"
             alternative = self._alt(session, BrowsrError(outcome), metrics["failed_url"])
             out = render.error(outcome, hint(outcome, None, alternative))
         finally:
@@ -162,6 +174,8 @@ class Browsr:
                 ms=round((time.monotonic() - started) * 1000, 3),
                 out_tokens=estimate(render.dumps(out)),
                 part=metrics["part"],
+                via=metrics["via"],
+                detail=detail[:300],
             )
         except Exception:
             logger.exception("Could not write call log")
@@ -259,8 +273,11 @@ class Browsr:
             url, part = call.url, 1
         metrics["failed_url"] = url
         await self.guard.check_url(url)
-        page = await self.pages.get(session.id, url)
-        metrics["cache"] = self.pages.cache_hit
+        try:
+            page = await self.pages.get(session.id, url)
+        finally:
+            metrics["cache"] = self.pages.cache_hit
+            metrics["via"] = self.pages.via
         pid = session.refs.for_url(page.final_url)
         session.refs.alias(url, pid)
         chunks = self._chunks(page, session, pid)

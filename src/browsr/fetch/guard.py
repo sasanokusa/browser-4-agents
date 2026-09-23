@@ -98,7 +98,7 @@ class Guard:
         if not await self.limiter.acquire(
             "domain:" + domain, self.cfg.security.domain_interval_s, 10
         ):
-            raise BrowsrError("blocked")
+            raise BrowsrError("timeout", detail="domain rate limit wait exceeded 10 seconds")
         if self.cfg.security.respect_robots:
             origin = f"{parts.scheme}://{parts.netloc}"
             parser = await self._robots_parser(origin)

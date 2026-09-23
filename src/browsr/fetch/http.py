@@ -1,9 +1,10 @@
-"""Fast HTTP path used before opening a browser in auto mode."""
+"""Guarded direct HTTP retrieval for auto mode, fallbacks, and adapters."""
 
 from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 
@@ -13,11 +14,21 @@ from ..errors import BrowsrError
 from ..models import RawPage
 from . import detect
 
+_HTML = {"text/html", "application/xhtml+xml"}
 _EMPTY_APP = re.compile(
     r'<div\b[^>]*\bid\s*=\s*["\'](?:root|app|__next|__nuxt)["\'][^>]*>\s*</div\s*>',
     re.IGNORECASE,
 )
 _NOSCRIPT = re.compile(r"<noscript\b[^>]*>(.*?)</noscript\s*>", re.IGNORECASE | re.DOTALL)
+
+
+@dataclass(frozen=True, slots=True)
+class HttpResult:
+    status: int
+    final_url: str
+    content_type: str
+    body: bytes
+    encoding: str
 
 
 def needs_js(html: str) -> bool:
@@ -29,29 +40,60 @@ def needs_js(html: str) -> bool:
     )
 
 
-class _Title(HTMLParser):
+class _VisibleHTML(HTMLParser):
+    """Collect page title and visible body text, not markup or script source."""
+
+    _HIDDEN = {"head", "script", "style", "template", "svg"}
+
     def __init__(self) -> None:
-        super().__init__()
-        self.in_title = False
-        self.parts: list[str] = []
+        super().__init__(convert_charrefs=True)
+        self._hidden: list[str] = []
+        self._in_title = False
+        self._in_body = False
+        self._saw_body = False
+        self.title_parts: list[str] = []
+        self.body_parts: list[str] = []
+        self.fallback_parts: list[str] = []
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs) -> None:
         if tag == "title":
-            self.in_title = True
+            self._in_title = True
+        if tag == "body":
+            self._in_body = True
+            self._saw_body = True
+        if tag in self._HIDDEN:
+            self._hidden.append(tag)
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if tag == "title":
-            self.in_title = False
+            self._in_title = False
+        if tag == "body":
+            self._in_body = False
+        if tag in self._HIDDEN and tag in self._hidden:
+            self._hidden.remove(tag)
 
-    def handle_data(self, data):
-        if self.in_title:
-            self.parts.append(data)
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title_parts.append(data)
+        if not self._hidden and data.strip():
+            self.fallback_parts.append(data)
+            if self._in_body:
+                self.body_parts.append(data)
+
+    @property
+    def title(self) -> str:
+        return unescape("".join(self.title_parts).strip())
+
+    @property
+    def body_text(self) -> str:
+        parts = self.body_parts if self._saw_body else self.fallback_parts
+        return " ".join(" ".join(parts).split())
 
 
-def _title(html: str) -> str:
-    parser = _Title()
+def _visible(html: str) -> _VisibleHTML:
+    parser = _VisibleHTML()
     parser.feed(html)
-    return unescape("".join(parser.parts).strip())
+    return parser
 
 
 class HttpFetcher:
@@ -60,7 +102,7 @@ class HttpFetcher:
         self.guard = guard
 
         async def checked_request(request: httpx.Request) -> None:
-            # httpx invokes this for every hop, including redirects.
+            # httpx invokes this before every hop, including redirects.
             await guard.check_url(str(request.url))
 
         self._client = httpx.AsyncClient(
@@ -70,12 +112,16 @@ class HttpFetcher:
             event_hooks={"request": [checked_request]},
         )
 
-    async def try_fetch(self, url: str):
+    async def request(self, url: str) -> HttpResult:
+        """Return bytes and metadata without mapping the HTTP status.
+
+        Adapters use this method so they can apply their own status semantics.
+        """
         await self.guard.check_url(url)
         try:
             async with self._client.stream("GET", url) as response:
                 status = response.status_code
-                ctype = (
+                content_type = (
                     response.headers.get("content-type", "text/html")
                     .split(";", 1)[0]
                     .strip()
@@ -92,45 +138,82 @@ class HttpFetcher:
                     body.extend(chunk)
                     if len(body) > self.cfg.fetch.max_bytes:
                         raise BrowsrError("unsupported", status=status)
-                final_url = str(response.url)
-                encoding = response.encoding or "utf-8"
+                return HttpResult(
+                    status=status,
+                    final_url=str(response.url),
+                    content_type=content_type,
+                    body=bytes(body),
+                    encoding=response.encoding or "utf-8",
+                )
         except BrowsrError:
             raise
         except httpx.TimeoutException as exc:
-            raise BrowsrError("timeout") from exc
-        except httpx.HTTPError:
-            # A browser may still be able to load sites that reject plain HTTP clients.
-            return None
-        detect.raise_for_status(status)
-        if ctype not in {"text/html", "application/xhtml+xml"}:
-            detect.raise_for_challenge(status, "", 0)
-            raw = RawPage(url, final_url, status, ctype, body=bytes(body))
+            raise BrowsrError("timeout", detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise BrowsrError("fetch_failed", detail=str(exc)) from exc
+
+    async def try_fetch(self, url: str):
+        return await self._fetch(url, strict=False)
+
+    async def fetch(self, url: str):
+        return await self._fetch(url, strict=True)
+
+    async def _fetch(self, url: str, *, strict: bool):
+        response = await self.request(url)
+        detect.raise_for_status(response.status)
+        body = response.body
+        if response.content_type not in _HTML:
+            detect.raise_for_challenge(response.status, "", 0, "")
+            raw = RawPage(
+                url, response.final_url, response.status, response.content_type, body=body
+            )
             from ..extract import to_page
 
             return await asyncio.to_thread(to_page, raw, self.cfg)
-        html = body.decode(encoding, errors="replace")
-        title = _title(html)
-        detect.raise_for_challenge(status, title, len(html))
-        if needs_js(html):
+
+        html = self._decode(response)
+        visible = _visible(html)
+        detect.raise_for_challenge(
+            response.status, visible.title, len(visible.body_text), visible.body_text[:1500]
+        )
+        if not strict and needs_js(html):
             return None
         import trafilatura
 
         md = await asyncio.to_thread(
             trafilatura.extract,
             html,
-            url=final_url,
+            url=response.final_url,
             output_format="markdown",
             include_links=True,
             include_tables=True,
             include_images=False,
             include_comments=False,
         )
-        if not md or len(md) < self.cfg.fetch.min_text_chars:
+        if not md:
+            if strict:
+                raise BrowsrError("fetch_failed", detail="empty HTTP extraction")
             return None
-        raw = RawPage(url, final_url, status, ctype, title=title, text=md)
+        if not strict and len(md) < self.cfg.fetch.min_text_chars:
+            return None
+        raw = RawPage(
+            url,
+            response.final_url,
+            response.status,
+            response.content_type,
+            title=visible.title,
+            text=md,
+        )
         from ..extract import to_page
 
         return await asyncio.to_thread(to_page, raw, self.cfg)
+
+    @staticmethod
+    def _decode(response: HttpResult) -> str:
+        try:
+            return response.body.decode(response.encoding, errors="replace")
+        except LookupError:
+            return response.body.decode("utf-8", errors="replace")
 
     async def close(self) -> None:
         await self._client.aclose()

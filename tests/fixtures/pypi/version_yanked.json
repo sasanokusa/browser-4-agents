@@ -1,0 +1,18 @@
+{
+  "info": {
+    "name": "Demo-Pkg",
+    "version": "1.0.1",
+    "summary": "A yanked version.",
+    "requires_python": "",
+    "license_expression": "",
+    "license": "BSD-3-Clause",
+    "yanked": true,
+    "description_content_type": "text/plain",
+    "description": "Plain description.",
+    "project_urls": {"Homepage": "https://demo.example/"}
+  },
+  "urls": [
+    {"upload_time_iso_8601": "2024-06-02T10:00:00Z"},
+    {"upload_time_iso_8601": "2024-06-01T10:00:00Z"}
+  ]
+}

@@ -9,12 +9,13 @@ class BrowsrError(Exception):
         self.detail = detail
 
 
-ALT_CODES = {"timeout", "blocked", "not_found", "unsupported", "disallowed"}
+ALT_CODES = {"timeout", "blocked", "fetch_failed", "not_found", "unsupported", "disallowed"}
 HINTS: dict[str, str] = {
     "bad_input": "Pass a URL, a result number, or search words.",
     "unknown_id": "Number not found. search again or pass a URL.",
     "timeout": "Page too slow. Try another result.",
     "blocked": "Site blocked access. Try another result.",
+    "fetch_failed": "Could not load page. Try another result.",
     "not_found": "Page not found (HTTP {status}). Try another result.",
     "unsupported": "Cannot read this file type. Try another result.",
     "forbidden_target": "This address is not allowed.",

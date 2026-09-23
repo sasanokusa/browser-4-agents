@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+import warnings
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,8 @@ class BrowserConfig:
 @dataclass(frozen=True, slots=True)
 class FetchConfig:
     mode: str = "browser"
+    fallbacks: list[str] = field(default_factory=lambda: ["http", "camoufox"])
+    blocked_memory_s: int = 3600
     min_text_chars: int = 500
     max_bytes: int = 20000000
 
@@ -230,6 +233,13 @@ def _validate(cfg: Config) -> None:
         raise ValueError("browser.engine must be 'firefox' or 'camoufox'")
     if cfg.fetch.mode not in {"browser", "auto"}:
         raise ValueError("fetch.mode must be 'browser' or 'auto'")
+    if cfg.fetch.blocked_memory_s < 0:
+        raise ValueError("fetch.blocked_memory_s must be non-negative")
+    if any(not isinstance(method, str) or not method for method in cfg.fetch.fallbacks):
+        raise ValueError("fetch.fallbacks must contain method names")
+    for method in cfg.fetch.fallbacks:
+        if method not in {"http", "camoufox"}:
+            warnings.warn(f"Unknown fetch fallback method: {method}", stacklevel=2)
     if cfg.tools.link_style not in {"id", "url"}:
         raise ValueError("tools.link_style must be 'id' or 'url'")
     if not 1000 <= cfg.output.max_tokens <= 8000:

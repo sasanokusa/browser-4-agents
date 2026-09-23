@@ -35,8 +35,9 @@ class _Context:
 
 
 class BrowserPool:
-    def __init__(self, cfg, guard=None):
+    def __init__(self, cfg, guard=None, engine: str | None = None):
         self.cfg = cfg
+        self.engine = engine if engine is not None else cfg.browser.engine
         self._owns_guard = guard is None
         self.guard = guard if guard is not None else Guard(cfg)
         self.user_agent = "browsr"
@@ -63,12 +64,12 @@ class BrowserPool:
                 while self._restarts and self._restarts[0] < now - 300:
                     self._restarts.popleft()
                 if len(self._restarts) >= 3:
-                    raise BrowsrError("blocked", detail="browser restart limit reached")
+                    raise BrowsrError("fetch_failed", detail="browser restart limit reached")
                 self._restarts.append(now)
             await self._shutdown()
             try:
                 await self._proxy.start()
-                if self.cfg.browser.engine == "camoufox":
+                if self.engine == "camoufox":
                     from camoufox.async_api import AsyncCamoufox
 
                     self._cm = AsyncCamoufox(
@@ -99,9 +100,13 @@ class BrowserPool:
                     await probe.close()
                 self.connected = True
                 self._started_once = True
-            except Exception:
+            except Exception as exc:
                 await self._shutdown()
-                raise
+                if isinstance(exc, BrowsrError):
+                    raise
+                if isinstance(exc, (TimeoutError, PlaywrightTimeoutError)):
+                    raise BrowsrError("timeout", detail=str(exc)) from exc
+                raise BrowsrError("fetch_failed", detail=str(exc)) from exc
 
     async def _shutdown(self) -> None:
         self.connected = False
@@ -207,17 +212,22 @@ class BrowserPool:
         return page, forbidden, requested
 
     async def _check_requested(self, requested: set[str]) -> None:
-        for url in requested:
-            if not await self.guard.host_allowed(url):
-                raise BrowsrError("forbidden_target")
+        if self.guard is None:
+            return
+        checked: set[str] = set()
+        while pending := requested - checked:
+            for url in pending:
+                if not await self.guard.host_allowed(url):
+                    raise BrowsrError("forbidden_target")
+                checked.add(url)
 
     async def _goto(self, page, url: str, forbidden: set[str], requested: set[str]):
         try:
             return await page.goto(
                 url, wait_until="domcontentloaded", timeout=self.cfg.browser.timeout_ms
             )
-        except PlaywrightTimeoutError as exc:
-            raise BrowsrError("timeout") from exc
+        except (TimeoutError, PlaywrightTimeoutError) as exc:
+            raise BrowsrError("timeout", detail=str(exc)) from exc
         except PlaywrightError as exc:
             message = str(exc)
             await self._check_requested(requested)
@@ -228,8 +238,8 @@ class BrowserPool:
             if "NS_ERROR_UNKNOWN_HOST" in message or "NS_ERROR_CONNECTION_REFUSED" in message:
                 raise BrowsrError("not_found") from exc
             if "NS_ERROR_NET_TIMEOUT" in message:
-                raise BrowsrError("timeout") from exc
-            raise BrowsrError("blocked", detail=message) from exc
+                raise BrowsrError("timeout", detail=message) from exc
+            raise BrowsrError("fetch_failed", detail=message) from exc
 
     async def run(
         self, sid: str, url: str, fn: Callable[[object, object | None], Awaitable[T]]
@@ -237,7 +247,12 @@ class BrowserPool:
         if self.guard is not None:
             await self.guard.check_url(url)
         async with self._sem:
-            entry = await self._context(sid)
+            try:
+                entry = await self._context(sid)
+            except (TimeoutError, PlaywrightTimeoutError) as exc:
+                raise BrowsrError("timeout", detail=str(exc)) from exc
+            except PlaywrightError as exc:
+                raise BrowsrError("fetch_failed", detail=str(exc)) from exc
             page = None
             try:
                 page, forbidden, requested = await self._page(entry.value)
@@ -250,6 +265,10 @@ class BrowserPool:
                 if forbidden:
                     raise BrowsrError("forbidden_target")
                 return result
+            except (TimeoutError, PlaywrightTimeoutError) as exc:
+                raise BrowsrError("timeout", detail=str(exc)) from exc
+            except PlaywrightError as exc:
+                raise BrowsrError("fetch_failed", detail=str(exc)) from exc
             finally:
                 if page is not None:
                     try:
@@ -262,7 +281,12 @@ class BrowserPool:
         if self.guard is not None:
             await self.guard.check_url(url)
         async with self._sem:
-            entry = await self._context(sid)
+            try:
+                entry = await self._context(sid)
+            except (TimeoutError, PlaywrightTimeoutError) as exc:
+                raise BrowsrError("timeout", detail=str(exc)) from exc
+            except PlaywrightError as exc:
+                raise BrowsrError("fetch_failed", detail=str(exc)) from exc
             page = None
             try:
                 page, forbidden, requested = await self._page(entry.value)
@@ -299,7 +323,10 @@ class BrowserPool:
                     EXTRACT_FN, {"minChars": self.cfg.extract.min_readability_chars}
                 )
                 detect.raise_for_challenge(
-                    status, result.get("title", ""), result.get("textLen", 0)
+                    status,
+                    result.get("title", ""),
+                    result.get("textLen", 0),
+                    result.get("textSample", ""),
                 )
                 await self._check_requested(requested)
                 if forbidden:
@@ -312,6 +339,10 @@ class BrowserPool:
                     html=result.get("html", ""),
                     title=result.get("title", ""),
                 )
+            except (TimeoutError, PlaywrightTimeoutError) as exc:
+                raise BrowsrError("timeout", detail=str(exc)) from exc
+            except PlaywrightError as exc:
+                raise BrowsrError("fetch_failed", detail=str(exc)) from exc
             finally:
                 if page is not None:
                     try:
@@ -337,19 +368,29 @@ class BrowserPool:
                 response = await ctx.request.get(
                     current, timeout=self.cfg.browser.timeout_ms, max_redirects=0
                 )
-            except PlaywrightTimeoutError as exc:
-                raise BrowsrError("timeout") from exc
+            except (TimeoutError, PlaywrightTimeoutError) as exc:
+                raise BrowsrError("timeout", detail=str(exc)) from exc
             except PlaywrightError as exc:
-                raise BrowsrError("blocked", detail=str(exc)) from exc
+                raise BrowsrError("fetch_failed", detail=str(exc)) from exc
             status = response.status
             if status in {301, 302, 303, 307, 308} and response.headers.get("location"):
                 current = urljoin(current, response.headers["location"])
-                await response.dispose()
+                try:
+                    await response.dispose()
+                except (TimeoutError, PlaywrightTimeoutError) as exc:
+                    raise BrowsrError("timeout", detail=str(exc)) from exc
+                except PlaywrightError as exc:
+                    raise BrowsrError("fetch_failed", detail=str(exc)) from exc
                 continue
             self._check_declared_length(response.headers, status)
             detect.raise_for_status(status)
-            detect.raise_for_challenge(status, "", 0)
-            body = await response.body()
+            detect.raise_for_challenge(status, "", 0, "")
+            try:
+                body = await response.body()
+            except (TimeoutError, PlaywrightTimeoutError) as exc:
+                raise BrowsrError("timeout", detail=str(exc)) from exc
+            except PlaywrightError as exc:
+                raise BrowsrError("fetch_failed", detail=str(exc)) from exc
             if len(body) > self.cfg.fetch.max_bytes:
                 raise BrowsrError("unsupported", status=status)
             return RawPage(
@@ -359,7 +400,7 @@ class BrowserPool:
                 _mime(response.headers.get("content-type", "application/octet-stream")),
                 body=body,
             )
-        raise BrowsrError("blocked", detail="too many redirects")
+        raise BrowsrError("fetch_failed", detail="too many redirects")
 
 
 async def settle(page, ms: int) -> None:

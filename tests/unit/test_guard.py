@@ -91,7 +91,7 @@ async def test_allow_private_and_domain_pacing():
     limiter.answer = False
     with pytest.raises(BrowsrError) as error:
         await guard.before_fetch("http://localhost:8080/path")
-    assert error.value.code == "blocked"
+    assert error.value.code == "timeout"
 
 
 @pytest.mark.asyncio

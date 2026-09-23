@@ -30,4 +30,5 @@ if (html === null) {
   } else html = '';
 }
 return { title: title.trim().slice(0, 200), html, method,
-         textLen: body ? body.innerText.length : 0 };
+         textLen: body ? body.innerText.length : 0,
+         textSample: body ? body.innerText.slice(0, 1500) : '' };

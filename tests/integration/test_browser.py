@@ -5,6 +5,7 @@ import threading
 import time
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,7 @@ from browsr.fetch.browser import BrowserPool
 from browsr.fetch.guard import Guard
 
 pytestmark = [pytest.mark.browser, pytest.mark.asyncio]
+DETECT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "detect"
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +43,19 @@ def site():
                 return
             if path == "/slow":
                 time.sleep(0.8)
-            if path == "/pdf":
+            status = 200
+            if path in {"/fastly", "/cloudflare", "/normal"}:
+                body = (DETECT_FIXTURES / f"{path[1:]}.html").read_bytes()
+                ctype = "text/html"
+            elif path == "/raw-404":
+                body = b"missing PDF"
+                ctype = "application/pdf"
+                status = 404
+            elif path == "/raw-503":
+                body = b"temporary block"
+                ctype = "application/pdf"
+                status = 503
+            elif path == "/pdf":
                 body = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF"
                 ctype = "application/pdf"
             elif path == "/consent":
@@ -81,7 +95,7 @@ def site():
                 )
                 ctype = "text/html"
             try:
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -151,6 +165,46 @@ async def test_pdf_download_fallback(site):
         raw = await pool.fetch("pdf", site + "/pdf")
         assert raw.content_type == "application/pdf"
         assert raw.body.startswith(b"%PDF")
+    finally:
+        await pool.close()
+
+
+@pytest.mark.parametrize("path", ["/fastly", "/cloudflare"])
+async def test_challenge_page_is_blocked(site, path):
+    cfg = config()
+    pool = BrowserPool(cfg, Guard(cfg))
+    try:
+        with pytest.raises(BrowsrError) as error:
+            await pool.fetch("challenge", site + path)
+        assert error.value.code == "blocked"
+        assert error.value.detail.startswith("challenge ")
+    finally:
+        await pool.close()
+
+
+async def test_short_normal_page_is_not_blocked(site):
+    cfg = config()
+    pool = BrowserPool(cfg, Guard(cfg))
+    try:
+        raw = await pool.fetch("normal", site + "/normal")
+        assert raw.title == "Garden notes"
+        assert "Autumn planting" in raw.html
+    finally:
+        await pool.close()
+
+
+@pytest.mark.parametrize(("path", "expected"), [("/raw-404", "not_found"), ("/raw-503", "blocked")])
+async def test_raw_status_errors(site, path, expected):
+    cfg = config()
+    pool = BrowserPool(cfg, Guard(cfg))
+    try:
+        entry = await pool._context("raw")
+        try:
+            with pytest.raises(BrowsrError) as error:
+                await pool._fetch_raw(entry.value, site + path)
+            assert error.value.code == expected
+        finally:
+            await pool._release(entry)
     finally:
         await pool.close()
 

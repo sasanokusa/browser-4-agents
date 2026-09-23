@@ -28,6 +28,8 @@ class CallLog:
             if not isinstance(raw, str):
                 raw = json.dumps(raw, ensure_ascii=False, default=str)
             payload["args_raw"] = raw[:500]
+        if "detail" in payload:
+            payload["detail"] = str(payload["detail"] or "")[:300]
         await asyncio.to_thread(self._append, payload)
 
     def _append(self, payload: dict[str, Any]) -> None:

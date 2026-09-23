@@ -33,6 +33,8 @@ cp browsr.toml.example browsr.toml
 
 設定は `--config` で渡したファイル、作業ディレクトリの `browsr.toml`、`~/.config/browsr/browsr.toml`、組み込み既定値の順で読み込みます。`BROWSR_<SECTION>__<KEY>` 形式の環境変数で個別設定を上書きできます。たとえば `BROWSR_SEARCH__SEARXNG__URL` を指定すると SearXNG の URL を変更します。
 
+ページ取得は PyPI などのサイト別取得を優先し、ブラウザが `blocked` または `fetch_failed` で失敗した場合は `[fetch] fallbacks = ["http", "camoufox"]` の順に再試行します。Camoufox は追加依存が利用できる場合だけ使います。`blocked_memory_s = 3600` の間は、アクセスを拒否したホストの主ブラウザ取得を省略します。タイムアウトや404では再試行しません。
+
 ## 使い方
 
 標準モードは `search` と `open` の2ツールです。`search` の結果番号を `open` に渡すか、ページ内リンクの番号で別ページを開けます。
@@ -88,6 +90,8 @@ SearXNG の設定は `searxng/settings.yml` にあります。公開環境へ置
 ## キャッシュとログ
 
 検索結果は既定で24時間、取得ページは1時間キャッシュされます。SQLite キャッシュの既定位置は `~/.cache/browsr/cache.sqlite` で、ページ上限は5,000件です。呼び出しログは JSON Lines 形式で `~/.local/state/browsr/calls.jsonl` に記録します。パスや有効期限は `browsr.toml` の `[cache]` と `[log]` で変更できます。検索・本文のキャッシュやログには閲覧した URL と内容に関する情報が含まれ得るため、共有環境では保存先の権限と保持期間を確認してください。
+
+取得方法はログの `via`、失敗の詳細は `detail`（最大300文字）で確認できます。`blocked` はサイトの CAPTCHA・アクセス拒否、`fetch_failed` は通信・ブラウザ・内部の失敗を表します。M6 の原因調査と検証範囲は [`docs/M6.md`](docs/M6.md) に記録しています。
 
 ## セキュリティ
 

@@ -5,6 +5,8 @@ from dataclasses import replace
 
 import httpx
 import pytest
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from browsr.config import Config
 from browsr.errors import BrowsrError
@@ -154,4 +156,163 @@ async def test_browser_restart_is_throttled():
     pool._restarts.extend([time.monotonic()] * 3)
     with pytest.raises(BrowsrError) as error:
         await pool.start()
-    assert error.value.code == "blocked"
+    assert error.value.code == "fetch_failed"
+
+
+def test_browser_engine_override():
+    cfg = Config()
+    pool = BrowserPool(cfg, Guard(), engine="camoufox")
+    assert pool.engine == "camoufox"
+    assert pool.cfg.browser.engine == cfg.browser.engine
+
+
+@pytest.mark.asyncio
+async def test_requested_urls_added_during_guard_await_are_checked():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    requested = {"https://example.org/first"}
+
+    class DelayedGuard(Guard):
+        async def host_allowed(self, url):
+            self.checked.append(url)
+            if url.endswith("/first"):
+                entered.set()
+                await release.wait()
+            return True
+
+    guard = DelayedGuard()
+    pool = BrowserPool(Config(), guard)
+    task = asyncio.create_task(pool._check_requested(requested))
+    await asyncio.wait_for(entered.wait(), 1)
+    requested.add("https://example.org/second")
+    release.set()
+    await asyncio.wait_for(task, 1)
+    assert set(guard.checked) == requested
+
+
+@pytest.mark.asyncio
+async def test_generic_goto_error_is_fetch_failed():
+    pool = BrowserPool(Config(), Guard())
+
+    class Page:
+        async def goto(self, *args, **kwargs):
+            raise PlaywrightError("browser disconnected")
+
+    with pytest.raises(BrowsrError) as error:
+        await pool._goto(Page(), "https://example.org/", set(), set())
+    assert error.value.code == "fetch_failed"
+    assert error.value.detail == "browser disconnected"
+
+
+@pytest.mark.asyncio
+async def test_browser_start_timeout_is_timeout(monkeypatch):
+    pool = BrowserPool(Config(), Guard())
+
+    async def slow_proxy_start():
+        raise PlaywrightTimeoutError("proxy startup timed out")
+
+    monkeypatch.setattr(pool._proxy, "start", slow_proxy_start)
+    with pytest.raises(BrowsrError) as error:
+        await pool.start()
+    assert error.value.code == "timeout"
+    assert error.value.detail == "proxy startup timed out"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["fetch", "run"])
+async def test_browser_context_timeout_is_timeout(monkeypatch, method):
+    pool = BrowserPool(Config(), Guard())
+
+    async def slow_context(sid):
+        raise PlaywrightTimeoutError("context timed out")
+
+    async def unused(page, response):
+        raise AssertionError("run callback must not execute")
+
+    monkeypatch.setattr(pool, "_context", slow_context)
+    with pytest.raises(BrowsrError) as error:
+        if method == "fetch":
+            await pool.fetch("sid", "https://example.org/")
+        else:
+            await pool.run("sid", "https://example.org/", unused)
+    assert error.value.code == "timeout"
+    assert error.value.detail == "context timed out"
+
+
+@pytest.mark.asyncio
+async def test_goto_timeout_keeps_detail():
+    pool = BrowserPool(Config(), Guard())
+
+    class Page:
+        async def goto(self, *args, **kwargs):
+            raise PlaywrightTimeoutError("navigation timed out")
+
+    with pytest.raises(BrowsrError) as error:
+        await pool._goto(Page(), "https://example.org/", set(), set())
+    assert error.value.code == "timeout"
+    assert error.value.detail == "navigation timed out"
+
+
+@pytest.mark.asyncio
+async def test_raw_request_error_is_fetch_failed():
+    pool = BrowserPool(Config(), Guard())
+
+    class Request:
+        async def get(self, *args, **kwargs):
+            raise PlaywrightError("connection reset")
+
+    class Context:
+        request = Request()
+
+    with pytest.raises(BrowsrError) as error:
+        await pool._fetch_raw(Context(), "https://example.org/report.pdf")
+    assert error.value.code == "fetch_failed"
+    assert error.value.detail == "connection reset"
+
+
+@pytest.mark.asyncio
+async def test_raw_body_timeout_is_timeout():
+    pool = BrowserPool(Config(), Guard())
+
+    class Response:
+        status = 200
+        headers = {"content-type": "application/pdf"}
+
+        async def body(self):
+            raise PlaywrightTimeoutError("raw body timed out")
+
+    class Request:
+        async def get(self, *args, **kwargs):
+            return Response()
+
+    class Context:
+        request = Request()
+
+    with pytest.raises(BrowsrError) as error:
+        await pool._fetch_raw(Context(), "https://example.org/report.pdf")
+    assert error.value.code == "timeout"
+    assert error.value.detail == "raw body timed out"
+
+
+@pytest.mark.asyncio
+async def test_raw_redirect_limit_is_fetch_failed():
+    pool = BrowserPool(Config(), Guard())
+
+    class Response:
+        status = 302
+        headers = {"location": "/next"}
+
+        async def dispose(self):
+            pass
+
+    class Request:
+        async def get(self, *args, **kwargs):
+            return Response()
+
+    class Context:
+        request = Request()
+
+    with pytest.raises(BrowsrError) as error:
+        await pool._fetch_raw(Context(), "https://example.org/report.pdf")
+    assert error.value.code == "fetch_failed"
+    assert error.value.detail == "too many redirects"

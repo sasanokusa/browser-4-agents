@@ -1,0 +1,36 @@
+{
+  "info": {
+    "name": "Demo-Pkg",
+    "version": "2.0",
+    "summary": "A demo package.",
+    "requires_python": ">=3.10",
+    "license_expression": "MIT",
+    "license": "Fallback license",
+    "yanked": false,
+    "description_content_type": "text/markdown; charset=UTF-8",
+    "description": "# Demo\n\nRead the [documentation](https://docs.example/guide).",
+    "project_urls": {
+      "Homepage": "https://demo.example/",
+      "Source": "https://code.example/demo"
+    }
+  },
+  "urls": [
+    {"upload_time_iso_8601": "2025-02-02T12:00:00Z"},
+    {"upload_time_iso_8601": "2025-02-01T09:00:00Z"}
+  ],
+  "releases": {
+    "0.9": [{"upload_time_iso_8601": "2024-12-01T00:00:00Z", "yanked": true}],
+    "1.0": [{"upload_time_iso_8601": "2025-01-01T00:00:00Z", "yanked": false}],
+    "2.0": [{"upload_time_iso_8601": "2025-02-01T00:00:00Z", "yanked": false}],
+    "3.0": [{"upload_time_iso_8601": "2025-03-01T00:00:00Z", "yanked": false}],
+    "4.0": [{"upload_time_iso_8601": "2025-04-01T00:00:00Z", "yanked": true}],
+    "5.0": [{"upload_time_iso_8601": "2025-05-01T00:00:00Z", "yanked": false}],
+    "6.0": [{"upload_time_iso_8601": "2025-06-01T00:00:00Z", "yanked": false}],
+    "7.0": [{"upload_time_iso_8601": "2025-07-01T00:00:00Z", "yanked": false}],
+    "8.0": [{"upload_time_iso_8601": "2025-08-01T00:00:00Z", "yanked": false}],
+    "9.0": [{"upload_time_iso_8601": "2025-09-01T00:00:00Z", "yanked": false}],
+    "10.0": [{"upload_time_iso_8601": "2025-10-01T00:00:00Z", "yanked": false}],
+    "11.0": [{"upload_time_iso_8601": "2025-11-01T00:00:00Z", "yanked": false}],
+    "12.0": [{"upload_time_iso_8601": "2025-12-01T00:00:00Z", "yanked": false}]
+  }
+}

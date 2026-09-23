@@ -41,7 +41,9 @@ async def app(tmp_path):
         last_backend="fake",
         close=AsyncMock(),
     )
-    service.pages = SimpleNamespace(get=AsyncMock(), cache_hit=False, close=AsyncMock())
+    service.pages = SimpleNamespace(
+        get=AsyncMock(), cache_hit=False, via="browser", close=AsyncMock(), drop_context=AsyncMock()
+    )
     yield service
     await service.close()
 
@@ -84,6 +86,66 @@ async def test_error_alternative_excludes_failed_and_opened(app):
     out = await app.call("one", "open", {"url": "1"})
     assert "open(2)" in out["hint"]
     assert (await app.call("one", "unknown", {}))["error"] == "bad_input"
+
+
+@pytest.mark.parametrize(
+    ("failure", "code", "detail"),
+    [
+        (
+            RuntimeError("Set changed size during iteration"),
+            "fetch_failed",
+            "RuntimeError: Set changed size during iteration",
+        ),
+        (TimeoutError("timed out"), "timeout", "TimeoutError: timed out"),
+        (
+            BrowsrError("blocked", status=403, detail="challenge title: Client Challenge"),
+            "blocked",
+            "challenge title: Client Challenge",
+        ),
+        (
+            BrowsrError("fetch_failed", detail="socket connection reset"),
+            "fetch_failed",
+            "socket connection reset",
+        ),
+    ],
+)
+async def test_failure_classification_detail_and_via(app, tmp_path, failure, code, detail):
+    await app.call("one", "search", {"query": "test"})
+    app.pages.get.side_effect = failure
+    app.pages.via = "http"
+    out = await app.call("one", "open", {"url": "1"})
+    assert out["error"] == code
+    assert "open(2)" in out["hint"]
+    assert set(out) == {"error", "hint"}
+    assert detail not in dumps(out)
+    record = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[-1])
+    assert record["outcome"] == code
+    assert record["detail"] == detail
+    assert record["via"] == "http"
+    assert record["cache"] is False
+
+
+async def test_log_detail_is_bounded_and_metrics_reset_between_calls(app, tmp_path):
+    app.pages.get.side_effect = BrowsrError("fetch_failed", detail="詳細" * 200)
+    await app.call("one", "open", {"url": "https://example.org/a"})
+    await app.call("one", "search", {"query": "test"})
+    records = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
+    assert len(records[0]["detail"]) == 300
+    assert records[0]["via"] == "browser"
+    assert records[1]["detail"] == ""
+    assert records[1]["via"] is None
+
+
+async def test_forbidden_target_does_not_reuse_previous_fetch_metrics(app, tmp_path):
+    app.pages.get.return_value = make_page()
+    await app.call("one", "open", {"url": "https://example.org/a"})
+    app.guard.check_url.side_effect = BrowsrError("forbidden_target")
+    out = await app.call("one", "open", {"url": "http://localhost/secret"})
+    assert out["error"] == "forbidden_target"
+    assert app.pages.get.await_count == 1
+    record = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[-1])
+    assert record["via"] is None
+    assert record["cache"] is False
 
 
 @pytest.mark.parametrize("style", ["id", "url"])
@@ -168,6 +230,7 @@ async def test_active_session_is_preserved_during_maintenance(app):
     session.last_access -= 10
     await app._sweep_sessions()
     app.pool.drop_context.assert_awaited_once_with("busy")
+    app.pages.drop_context.assert_awaited_once_with("busy")
     assert app.sessions.get("busy") is not session
 
 

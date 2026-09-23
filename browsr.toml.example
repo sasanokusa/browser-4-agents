@@ -31,6 +31,8 @@ block = ["image", "font", "media"]
 
 [fetch]
 mode = "browser"
+fallbacks = ["http", "camoufox"]
+blocked_memory_s = 3600
 min_text_chars = 500
 max_bytes = 20000000
 

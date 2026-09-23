@@ -195,7 +195,13 @@ async def test_calllog_appends_json_lines_and_bounds_raw_arguments(tmp_path, cap
     log = CallLog(SimpleNamespace(calls_path=str(tmp_path / "nested" / "calls.jsonl")))
     await asyncio.gather(
         *(
-            log.write(session=f"s{i}", tool="search", args_raw={"query": "x" * 600}, outcome="ok")
+            log.write(
+                session=f"s{i}",
+                tool="search",
+                args_raw={"query": "x" * 600},
+                outcome="ok",
+                detail="詳細" * 200,
+            )
             for i in range(8)
         )
     )
@@ -203,6 +209,7 @@ async def test_calllog_appends_json_lines_and_bounds_raw_arguments(tmp_path, cap
     entries = [json.loads(line) for line in lines]
     assert len(entries) == 8
     assert all(len(item["args_raw"]) == 500 for item in entries)
+    assert all(len(item["detail"]) == 300 for item in entries)
     assert all(item["ts"] and item["tool"] == "search" for item in entries)
     assert capsys.readouterr().out == ""
     await log.close()
