@@ -1,0 +1,11 @@
+[server]
+mode = "single"
+
+[tools]
+link_style = "id"
+
+[tools.descriptions]
+web = "Search the public web for words, or open a URL or numbered search result or link. Returns useful result details or readable page text."
+
+[output]
+max_tokens = 1000

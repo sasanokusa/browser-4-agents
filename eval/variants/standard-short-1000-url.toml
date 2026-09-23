@@ -1,0 +1,12 @@
+[server]
+mode = "standard"
+
+[tools]
+link_style = "url"
+
+[tools.descriptions]
+search = "Search. Returns numbered results."
+open = "Open a URL or number. Returns page text."
+
+[output]
+max_tokens = 1000

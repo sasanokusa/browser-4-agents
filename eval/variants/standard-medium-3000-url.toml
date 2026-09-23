@@ -1,0 +1,12 @@
+[server]
+mode = "standard"
+
+[tools]
+link_style = "url"
+
+[tools.descriptions]
+search = "Search the web for useful results. Returns numbered results with titles, URLs, and snippets."
+open = "Open a URL or numbered result/link. Returns the extracted page text."
+
+[output]
+max_tokens = 3000

@@ -1,0 +1,11 @@
+[server]
+mode = "single"
+
+[tools]
+link_style = "id"
+
+[tools.descriptions]
+web = "Search or open a URL or number."
+
+[output]
+max_tokens = 6000

@@ -1,0 +1,11 @@
+[server]
+mode = "single"
+
+[tools]
+link_style = "id"
+
+[tools.descriptions]
+web = "Search the web, or open a URL or numbered result. Returns numbered results or page text."
+
+[output]
+max_tokens = 3000

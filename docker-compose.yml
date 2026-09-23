@@ -1,0 +1,20 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./searxng:/etc/searxng
+    restart: unless-stopped
+
+  browsr:
+    build: .
+    command: ["serve", "--transport", "http", "--host", "0.0.0.0"]
+    environment:
+      BROWSR_SEARCH__SEARXNG__URL: "http://searxng:8080"
+      BROWSR_SECURITY__ALLOW_PRIVATE: "false"
+    ports:
+      - "127.0.0.1:8765:8765"
+    depends_on:
+      - searxng
+    restart: unless-stopped

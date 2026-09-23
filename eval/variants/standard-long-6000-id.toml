@@ -1,0 +1,12 @@
+[server]
+mode = "standard"
+
+[tools]
+link_style = "id"
+
+[tools.descriptions]
+search = "Search the public web for information relevant to the query. Returns numbered results with titles, URLs, and short snippets that can be opened for more detail."
+open = "Open a web address or a numbered search result or page link. Returns the page title, source URL, and readable page text, possibly in numbered parts."
+
+[output]
+max_tokens = 6000

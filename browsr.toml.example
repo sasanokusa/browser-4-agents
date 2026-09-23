@@ -1,0 +1,79 @@
+[server]
+mode = "standard"
+transport = "stdio"
+host = "127.0.0.1"
+port = 8765
+
+[tools]
+tip = true
+link_style = "id"
+
+[tools.descriptions]
+
+[output]
+max_tokens = 3000
+envelope_reserve = 150
+results = 8
+snippet_chars = 200
+max_markdown_chars = 300000
+max_links = 2000
+
+[browser]
+engine = "firefox"
+headless = true
+max_tabs = 4
+max_contexts = 8
+timeout_ms = 15000
+settle_ms = 2000
+locale = "ja-JP"
+timezone = "Asia/Tokyo"
+block = ["image", "font", "media"]
+
+[fetch]
+mode = "browser"
+min_text_chars = 500
+max_bytes = 20000000
+
+[extract]
+min_readability_chars = 200
+max_pdf_pages = 300
+
+[search]
+backends = ["searxng", "ddg", "mojeek"]
+language = "auto"
+cooldown_s = 600
+fail_threshold = 2
+max_wait_s = 5
+
+[search.searxng]
+url = "http://127.0.0.1:8888"
+interval_s = 0.5
+timeout_s = 8
+
+[search.ddg]
+region = "jp-jp"
+interval_s = 3
+timeout_s = 12
+
+[search.mojeek]
+interval_s = 3
+timeout_s = 12
+
+[cache]
+path = "~/.cache/browsr/cache.sqlite"
+search_ttl_s = 86400
+page_ttl_s = 3600
+max_pages = 5000
+
+[security]
+allow_private = false
+domain_interval_s = 1.0
+respect_robots = false
+
+[session]
+ttl_s = 3600
+max_refs = 10000
+
+[log]
+calls_path = "~/.local/state/browsr/calls.jsonl"
+level = "INFO"

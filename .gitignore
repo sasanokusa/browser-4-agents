@@ -1,0 +1,37 @@
+# Local configuration and credentials
+browsr.toml
+.env
+.env.*
+!.env.example
+
+# Python environments, caches, and build artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Runtime data and evaluation output
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+calls*.jsonl
+*.log
+/eval/results/
+
+# Local editor, OS, and agent files
+.DS_Store
+.idea/
+.vscode/
+.commandcode/

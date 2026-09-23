@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "browsr-4-agent"
+version = "0.1.0"
+description = "A browser search and page reading server for AI agents"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "mcp>=1.12,<3",
+  "playwright>=1.49",
+  "httpx>=0.27",
+  "markdownify>=1.1",
+  "trafilatura>=2.0",
+  "pymupdf>=1.24",
+]
+
+[project.optional-dependencies]
+camoufox = ["camoufox[geoip]>=0.4"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.9"]
+
+[project.scripts]
+browsr = "browsr.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+browsr = ["extract/assets/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "-m 'not network'"
+markers = [
+  "browser: tests requiring a local browser runtime",
+  "network: tests that access external network services",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
